@@ -25,6 +25,8 @@ flowchart TD
         DQ -->|Pass| SL[Silver] --> GL[Gold]
         DQ -->|Fail| QR[Quarantine]
     end
+```
+
 ---
 
 ## 🧪 Hands-On Labs (6 Production Simulations)
@@ -42,8 +44,8 @@ flowchart TD
 
 ## 📚 Documentation & Study Guides
 
-* **`docs/DDIA_MASTER_GUIDE.md`** — Comprehensive mapping of all 12 DDIA chapters to hands-on implementations across the 6 labs.
-* **`docs/INTERVIEW_SCRIPT_THAI_ENG.md`** — Bilingual (English & Thai) system design and technical interview scripts structured around *Problem ➔ Solution & Impact*.
+- **`docs/DDIA_MASTER_GUIDE.md`** — Comprehensive mapping of all 12 DDIA chapters to hands-on implementations across the 6 labs.
+- **`docs/INTERVIEW_SCRIPT_THAI_ENG.md`** — Bilingual (English & Thai) system design and technical interview scripts structured around *Problem ➔ Solution & Impact*.
 
 ---
 
@@ -54,3 +56,6 @@ To explore the byte-level encoding analyzer and interactive 12-chapter DDIA simu
 ```bash
 cd lab5-encoding-evolution
 python encoding_app.py
+```
+
+Then open your browser at `http://localhost:8085`.
