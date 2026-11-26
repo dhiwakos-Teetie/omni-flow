@@ -14,7 +14,7 @@
 ## 🏗️ System Architecture Overview
 
 ```mermaid
-flowchart LR
+flowchart TD
     PG[(PostgreSQL\nWAL & Outbox)] -->|Debezium CDC| K[Apache Kafka\nKRaft 3 Partitions]
     K -->|Real-Time Ingestion| CH[(ClickHouse\nReplacingMergeTree)]
     K -->|Event Time & 5s Watermark| FL[Apache Flink 1.19\n10s Tumbling Window]
