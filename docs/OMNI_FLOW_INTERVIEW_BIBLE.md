@@ -1,0 +1,42 @@
+# 📖 Omni-Flow: คัมภีร์เตรียมสัมภาษณ์เชิงลึก (Master Index)
+
+> **หลักการสำคัญของคัมภีร์เล่มนี้:**  
+> พูดเฉพาะ **สิ่งที่โค้ดใน Omni-Flow ทำจริง** และ **ตัวเลขที่เราทดสอบวัดผลจริงบนเครื่อง**, ยอมรับข้อจำกัดของ Lab ตรงไปตรงมา (Lab Limitation), แล้วอธิบายวิธีปิดแผลขึ้นระบบจริง (Production Hardening) อย่างเป็นระบบ — **1 คำถาม แยกเป็น 1 ไฟล์ `.md`** ใน [`docs/interview-qa/`](interview-qa) เพื่อเปิดทบทวนคู่กับโค้ดแต่ละ Lab ได้ทันที
+
+---
+
+## 🗺️ สารบัญคำถาม: คำถามไหน ไปเปิดอ่านไฟล์ไหน & ดู Lab ไหน (1 คำถาม = 1 ไฟล์)
+
+| รหัส | ไฟล์คำถามเจาะลึก (คลิกอ่าน) | Lab อ้างอิงหลัก | ไฟล์โค้ดที่ต้องเปิดดูคู่กัน | เรื่องที่ต้องโฟกัสตอนทวน |
+| :--- | :--- | :--- | :--- | :--- |
+| **Q01** | **[`Q01_lab3_replacing_mergetree_stale_zombie_ts.md`](interview-qa/Q01_lab3_replacing_mergetree_stale_zombie_ts.md)** | [`lab3-debezium-cdc`](../lab3-debezium-cdc) | [`cdc_sink_worker.py`](../lab3-debezium-cdc/cdc_sink_worker.py#L23-L35), [`replacing_mergetree_lab.py`](../lab3-debezium-cdc/replacing_mergetree_lab.py), [`verify_clickhouse_real.py`](../lab3-debezium-cdc/verify_clickhouse_real.py) | `ReplacingMergeTree`, `FINAL`, `argMax ... HAVING`, Zombie Row Trap, `FINAL CLEANUP`, `wal_lsn` |
+| **Q02** | **[`Q02_lab3_100m_scale_argmax_collapsing_delta_mv.md`](interview-qa/Q02_lab3_100m_scale_argmax_collapsing_delta_mv.md)** | [`lab3-debezium-cdc`](../lab3-debezium-cdc) | [`benchmark_cdc_engines.py`](../lab3-debezium-cdc/benchmark_cdc_engines.py), [`init-postgres.sql`](../lab3-debezium-cdc/init-postgres.sql#L1-L13) | High-cardinality RAM (`114.9MB` vs `0.05MB`), `PROJECTION`/Naive MV traps, `VersionedCollapsing`, Query Cache |
+| **Q03** | **[`Q03_lab3_delta_fanout_and_dedup_token_window.md`](interview-qa/Q03_lab3_delta_fanout_and_dedup_token_window.md)** | [`lab3-debezium-cdc`](../lab3-debezium-cdc) (+ [`lab4`](../lab4-orchestration-audit)) | [`init-postgres.sql`](../lab3-debezium-cdc/init-postgres.sql#L12), [`cdc_sink_worker.py`](../lab3-debezium-cdc/cdc_sink_worker.py#L92-L115), [`benchmark_cdc_engines.py`](../lab3-debezium-cdc/benchmark_cdc_engines.py#L64-L98), [`orchestrator_app.py`](../lab4-orchestration-audit/orchestrator_app.py) | Logic `-1/+1` จาก `REPLICA IDENTITY FULL`, `ENGINE = Null`, `deduplicate_blocks_in_dependent_materialized_views`, `REPLACE PARTITION` |
+| **Q04** | **[`Q04_lab1_flink_late_data_watermark_smurfing.md`](interview-qa/Q04_lab1_flink_late_data_watermark_smurfing.md)** | [`lab1-flink-stream`](../lab1-flink-stream) | [`flink_job.sql`](../lab1-flink-stream/flink_job.sql#L1-L48), [`payment_producer.py`](../lab1-flink-stream/payment_producer.py#L62-L71), [`clickhouse_sink.py`](../lab1-flink-stream/clickhouse_sink.py#L21-L32) | 5s Watermark vs 12s Late Data, 10s Checkpoint, `allowedLateness` + `sideOutputLateData`, Smurfing 15k×2 (`OVER RANGE`) |
+| **Q05** | **[`Q05_lab2_minio_lakehouse_crash_and_schema_evolution.md`](interview-qa/Q05_lab2_minio_lakehouse_crash_and_schema_evolution.md)** | [`lab2-minio-lakehouse`](../lab2-minio-lakehouse) (+ [`lab5`](../lab5-encoding-evolution)) | [`lakehouse_sink_worker.py`](../lab2-minio-lakehouse/lakehouse_sink_worker.py#L16-L197), [`LAKEHOUSE_TESTING_GUIDE.md`](../lab2-minio-lakehouse/LAKEHOUSE_TESTING_GUIDE.md#L69-L92) | S3 Atomic PUT vs Orphan File, Wildcard `*.parquet` vs Catalog/Iceberg, `allow_missing_columns`, Field-ID Evolution |
+| **Q06** | **[`Q06_lab4_medallion_reprocess_and_large_scale_audit.md`](interview-qa/Q06_lab4_medallion_reprocess_and_large_scale_audit.md)** | [`lab4-orchestration-audit`](../lab4-orchestration-audit) (+ [`lab2`](../lab2-minio-lakehouse)) | [`orchestrator_app.py`](../lab4-orchestration-audit/orchestrator_app.py#L56-L310) | Quarantine State Machine (`OPEN`->`PROMOTED`), `REPLACE PARTITION`, Two-Tier `bitXor(cityHash64)` Audit, `grace_hash` |
+| **Q07** | **[`Q07_lab5_protobuf_avro_wire_evolution.md`](interview-qa/Q07_lab5_protobuf_avro_wire_evolution.md)** | [`lab5-encoding-evolution`](../lab5-encoding-evolution) | [`encoding_app.py`](../lab5-encoding-evolution/encoding_app.py#L84-L398) | Wire Type Mismatch (`0x10` vs `0x12`), Expand & Contract + `reserved`, Avro Writer's Schema vs Protobuf Tags |
+| **Q08** | **[`Q08_command_center_surge_triage_backpressure_recovery.md`](interview-qa/Q08_command_center_surge_triage_backpressure_recovery.md)** | [`omni-command-center`](../omni-command-center) (+ All Labs) | [`dashboard.py`](../omni-command-center/dashboard.py#L90-L111), [`consumer.py`](../omni-command-center/consumer.py#L181-L319), [`producer.py`](../omni-command-center/producer.py#L26-L132) | Downstream-to-Upstream Triage, Kafka Shock Absorber, Unaligned Checkpoints, Tiered Load Shedding, 4-Phase Recovery |
+
+---
+
+## 0. Honest 6-Lab Code Audit (จุดแข็งจริง vs จุดอ่อนที่จะโดนจี้ในแต่ละ Lab)
+
+| Lab / โฟลเดอร์ | สิ่งที่โค้ดทำได้จริง (อ้างอิงไฟล์) | จุดอ่อน / ข้อจำกัดใน Lab ที่ต้องยอมรับตรงๆ + แนวทางแก้ขึ้น Prod |
+| :--- | :--- | :--- |
+| **[`omni-command-center`](../omni-command-center)** | Kafka KRaft 3 Partitions, `enable.idempotence=True`, `acks="all"` ([`producer.py`](../omni-command-center/producer.py#L129-L130)), manual commit + `on_assign`/`on_revoke` rebalance hooks ([`consumer.py`](../omni-command-center/consumer.py#L98-L110)), `docker-compose.3brokers.yml` สำหรับ Chaos Test | 1) `replication_factor=1` ใน `NewTopic` ถ้าใช้บน multi-broker ต้องปรับเป็น `RF=3, min.insync.replicas=2`<br>2) Window state อยู่ใน Python RAM และใช้ Processing Time (`time.time() // 5`) จึงต่อยอดไปยัง Flink ใน Lab 1 |
+| **[`lab1-flink-stream`](../lab1-flink-stream)** | Apache Flink 1.19 SQL จริง: `checkpointing='10s'`, `WATERMARK FOR event_ts - INTERVAL '5' SECOND`, `TUMBLE(10s)`, ดัก `amount >= 25000` ([`flink_job.sql`](../lab1-flink-stream/flink_job.sql)), sink ลง ClickHouse `ReplacingMergeTree` ([`clickhouse_sink.py`](../lab1-flink-stream/clickhouse_sink.py)) | 1) ยังไม่มี `table.exec.source.idle-timeout` (ถ้าบาง partition ว่าง Watermark จะค้าง)<br>2) Late data เกิน Watermark โดน Drop เงียบๆ<br>3) Kafka sink ยังใช้ default `at-least-once` และยังไม่มี `user_id` Key |
+| **[`lab2-minio-lakehouse`](../lab2-minio-lakehouse)** | ยิงไฟล์ Apache Parquet จริงขึ้น MinIO S3 ผ่าน `INSERT INTO FUNCTION s3(..., 'Parquet')` และบันทึก `lakehouse_snapshots` ([`lakehouse_sink_worker.py`](../lab2-minio-lakehouse/lakehouse_sink_worker.py#L152-L195)) | 1) Small File Problem: flush ทุก 20 แถว (Prod ควร flush ตามขนาดไฟล์ ~128MB หรือเวลา)<br>2) เขียน 3 จุดไม่ Atomic และยังไม่มี TTL ลบ Hot Tier<br>3) **คำเตือน:** ยังไม่มีสคริปต์วัด % ประหยัด Storage จริง ห้ามเคลมตัวเลข "70%" ลอยๆ |
+| **[`lab3-debezium-cdc`](../lab3-debezium-cdc)** | PostgreSQL `wal_level=logical` + `REPLICA IDENTITY FULL` ([`init-postgres.sql`](../lab3-debezium-cdc/init-postgres.sql#L12)), Debezium WAL -> ClickHouse, **พร้อมตัวพิสูจน์ & Benchmark จริงบน ClickHouse 24.8** ([`replacing_mergetree_lab.py`](../lab3-debezium-cdc/replacing_mergetree_lab.py), [`verify_clickhouse_real.py`](../lab3-debezium-cdc/verify_clickhouse_real.py), [`benchmark_cdc_engines.py`](../lab3-debezium-cdc/benchmark_cdc_engines.py)) | ใน [`cdc_sink_worker.py`](../lab3-debezium-cdc/cdc_sink_worker.py) ตัวสาธิตยัง insert ทีละ 1 แถว (Prod ต้องทำ Micro-batch), ยังใช้ `ts_ms` (Prod เปลี่ยนเป็น `source.lsn`), และตาราง `outbox_events` สร้างไว้ใน Postgres แล้วแต่ยังไม่ได้ต่อ Connector ฝั่งอ่าน |
+| **[`lab4-orchestration-audit`](../lab4-orchestration-audit)** | Medallion DAG (Bronze -> DQ Gate แยก Silver/Quarantine -> Gold) + `dag_run_history` ([`orchestrator_app.py`](../lab4-orchestration-audit/orchestrator_app.py)) | 1) ดึง Batch ด้วย `WHERE seq_no > last_seq` ถ้าข้อมูล `seq_no` ต่ำมาช้าจะหลุดหาย<br>2) `quarantine_bad_rows` เป็น `MergeTree()` ธรรมดา และยังไม่มี Replay/Reprocess flow |
+| **[`lab5-encoding-evolution`](../lab5-encoding-evolution)** | Byte-level Wire-format Simulator ด้วย Python ล้วน (Varint, ZigZag, `JSON 81B` vs `Protobuf 33B` vs `Avro 32B`) + DDIA 12-Chapter Interactive Simulator ([`encoding_app.py`](../lab5-encoding-evolution/encoding_app.py)) | เป็น Learning Simulator ไม่ได้ต่อ Confluent Schema Registry จริงกับ Kafka ใน Lab 1–4 (ให้อธิบายตรงๆ ว่าเป็น Playground ผ่าไบต์ตาม DDIA บทที่ 4) |
+
+---
+
+## ✅ สถานะคัมภีร์: ครอบคลุมครบทั้ง 6 Labs (`Q01`–`Q08`) แล้ว
+- `lab3-debezium-cdc`: `Q01`, `Q02`, `Q03` (พร้อมตัวเลข Benchmark จริงบน ClickHouse 24.8)
+- `lab1-flink-stream`: `Q04`
+- `lab2-minio-lakehouse`: `Q05`
+- `lab4-orchestration-audit`: `Q06`
+- `lab5-encoding-evolution`: `Q07`
+- `omni-command-center` + End-to-End Architecture: `Q08`
