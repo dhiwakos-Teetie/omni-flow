@@ -18,6 +18,7 @@
 | **Q07** | **[`Q07_lab5_protobuf_avro_wire_evolution.md`](interview-qa/Q07_lab5_protobuf_avro_wire_evolution.md)** | [`lab5-encoding-evolution`](../lab5-encoding-evolution) | [`encoding_app.py`](../lab5-encoding-evolution/encoding_app.py#L84-L398) | Wire Type Mismatch (`0x10` vs `0x12`), Expand & Contract + `reserved`, Avro Writer's Schema vs Protobuf Tags |
 | **Q08** | **[`Q08_command_center_surge_triage_backpressure_recovery.md`](interview-qa/Q08_command_center_surge_triage_backpressure_recovery.md)** | [`omni-command-center`](../omni-command-center) (+ All Labs) | [`dashboard.py`](../omni-command-center/dashboard.py#L90-L111), [`consumer.py`](../omni-command-center/consumer.py#L181-L319), [`producer.py`](../omni-command-center/producer.py#L26-L132) | Downstream-to-Upstream Triage, Kafka Shock Absorber, Unaligned Checkpoints, Tiered Load Shedding, 4-Phase Recovery |
 | **Q09** | **[`Q09_ddia_consistency_outbox_monotonic_fencing.md`](interview-qa/Q09_ddia_consistency_outbox_monotonic_fencing.md)** | [`lab5-encoding-evolution`](../lab5-encoding-evolution) + [`lab3`](../lab3-debezium-cdc) + [`omni`](../omni-command-center) | [`encoding_app.py`](../lab5-encoding-evolution/encoding_app.py#L1010-L1395), [`init-postgres.sql`](../lab3-debezium-cdc/init-postgres.sql#L14-L23), [`producer.py`](../omni-command-center/producer.py#L129) | Read-Your-Writes (`min_lsn`), Monotonic Reads, Consistent Prefix, Transactional Outbox, Monotonic Clock & Fencing Tokens |
+| **Q10** | **[`Q10_backfill_and_pragmatic_tradeoffs.md`](interview-qa/Q10_backfill_and_pragmatic_tradeoffs.md)** | All Labs (`lab2` + `lab1` + `lab4`) | [`LAKEHOUSE_TESTING_GUIDE.md`](../lab2-minio-lakehouse/LAKEHOUSE_TESTING_GUIDE.md#L62-L92), [`INTERVIEW_SCRIPT_THAI_ENG.md`](INTERVIEW_SCRIPT_THAI_ENG.md#L101-L117) | Isolated 6-Month Backfill (S3 + Batch Mode + `cutoff_ts` + `REPLACE PARTITION`), Blue-Green Swap, Latency/Cost/Complexity Trade-offs |
 
 ---
 
@@ -34,7 +35,7 @@
 
 ---
 
-## ✅ สถานะคัมภีร์: ครอบคลุมครบทั้ง 6 Labs + DDIA Cross-Cutting (`Q01`–`Q09`) แล้ว
+## ✅ สถานะคัมภีร์: ปิดเล่มสมบูรณ์ครบทั้ง 6 Labs + Cross-Architecture (`Q01`–`Q10`) แล้ว!
 - `lab3-debezium-cdc`: `Q01`, `Q02`, `Q03` (พร้อมตัวเลข Benchmark จริงบน ClickHouse 24.8)
 - `lab1-flink-stream`: `Q04`
 - `lab2-minio-lakehouse`: `Q05`
@@ -42,3 +43,4 @@
 - `lab5-encoding-evolution`: `Q07`
 - `omni-command-center` + End-to-End Architecture: `Q08`
 - Cross-Lab DDIA Ch. 5, 7, 8 (Consistency, Outbox, Clocks & Fencing Tokens): `Q09`
+- Final Boss (6-Month Historical Backfill & Pragmatic Engineering Trade-offs): `Q10`
