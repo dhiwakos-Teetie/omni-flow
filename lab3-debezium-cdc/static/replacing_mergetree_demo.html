@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lab 3 Deep-Dive: ClickHouse ReplacingMergeTree CDC Simulator</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      background-color: #0b0f19;
+      color: #e2e8f0;
+      font-family: 'Inter', 'Segoe UI', Tahoma, sans-serif;
+    }
+    .glass-card {
+      background: rgba(17, 24, 39, 0.92);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: 0.75rem;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    }
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+  </style>
+</head>
+<body class="p-4 md:p-6 min-h-screen flex flex-col gap-4 max-w-[1440px] mx-auto">
+
+  <!-- HEADER & INTERVIEW PROMPT -->
+  <header class="glass-card p-5 flex flex-col gap-3">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded bg-sky-500/20 text-sky-300 border border-sky-500/40">
+          Lab 3 Deep-Dive • ClickHouse CDC Simulator
+        </span>
+        <span class="text-xs px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
+          ReplacingMergeTree(version_ts, is_deleted) vs (wal_lsn, kafka_offset)
+        </span>
+      </div>
+      <div id="truth-badge" class="text-xs font-semibold px-3 py-1 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+        Loading...
+      </div>
+    </div>
+
+    <div class="bg-slate-950/70 border border-slate-800 rounded-lg p-3 text-xs md:text-sm text-slate-300">
+      <span class="font-bold text-amber-300">Interviewer Question:</span>
+      <em>"ReplacingMergeTree only deduplicates asynchronously during background merges. How do you prevent stale or soft-deleted rows from showing up right after an UPDATE/DELETE, and what happens if two updates land with the exact same version_ts?"</em>
+    </div>
+
+    <!-- SCENARIO CONTROLS -->
+    <div class="flex flex-wrap items-center gap-2 pt-1">
+      <button onclick="runAction('/api/scenario/1-stale-read')" id="btn-1-stale-read"
+        class="px-3 py-2 rounded-lg text-xs font-bold bg-sky-600 hover:bg-sky-500 text-white cursor-pointer transition">
+        1️⃣ Scenario 1: Stale &amp; Duplicate Read
+      </button>
+      <button onclick="runAction('/api/scenario/2-zombie-trap')" id="btn-2-zombie-trap"
+        class="px-3 py-2 rounded-lg text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white cursor-pointer transition">
+        2️⃣ Scenario 2: Soft-Delete &amp; Zombie Row Trap
+      </button>
+      <button onclick="runAction('/api/scenario/3-same-ts-collision')" id="btn-3-same-ts-collision"
+        class="px-3 py-2 rounded-lg text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white cursor-pointer transition">
+        3️⃣ Scenario 3: Same-ms version_ts Collision
+      </button>
+      <button onclick="runAction('/api/action/merge')"
+        class="px-3 py-2 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer transition">
+        ⚙️ Trigger Background Merge (Cleanup)
+      </button>
+      <button onclick="runAction('/api/reset')"
+        class="px-3 py-2 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 cursor-pointer transition ml-auto">
+        🔄 Reset
+      </button>
+    </div>
+  </header>
+
+  <!-- SCENARIO EXPLANATION + TAKEAWAY -->
+  <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="glass-card p-4">
+      <h2 id="scenario-title" class="text-sm font-bold text-sky-300 mb-1">...</h2>
+      <p id="scenario-explanation" class="text-xs md:text-sm text-slate-300 leading-relaxed"></p>
+    </div>
+    <div class="glass-card p-4 border-emerald-500/30">
+      <h2 class="text-sm font-bold text-emerald-300 mb-1">🎯 Interview Takeaway (จุดตอบสัมภาษณ์)</h2>
+      <p id="interview-takeaway" class="text-xs md:text-sm text-slate-200 leading-relaxed"></p>
+    </div>
+  </section>
+
+  <!-- MERGETREE DATA PARTS ON DISK -->
+  <section class="glass-card p-4 flex flex-col gap-3">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <h2 class="text-sm font-bold text-white">
+          🧱 ClickHouse Unmerged Data Parts on Disk
+          <span id="parts-summary" class="ml-2 text-xs font-normal text-sky-300"></span>
+        </h2>
+        <p class="text-xs text-slate-400">ทุกครั้งที่ CDC Worker ยิง Batch เข้ามา ClickHouse จะสร้าง Immutable Part ใหม่ทันที (ยังไม่ยุบรวมจนกว่า Background Merge จะทำงาน)</p>
+      </div>
+    </div>
+    <div id="parts-container" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3"></div>
+  </section>
+
+  <!-- 4-WAY QUERY COMPARISON GRID -->
+  <section class="grid grid-cols-1 lg:grid-cols-2 gap-4" id="queries-grid"></section>
+
+  <!-- CUSTOM CDC EVENT SIMULATOR + EVENT LOG -->
+  <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div class="glass-card p-4 flex flex-col gap-3">
+      <h2 class="text-sm font-bold text-purple-300">🧪 ยิง CDC Event เพิ่มเอง (จำลอง Update / Delete / Same-ms Retry)</h2>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
+        <label class="flex flex-col gap-1">
+          <span class="text-slate-400">Order ID</span>
+          <input id="ev-order-id" type="number" value="101" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white" />
+        </label>
+        <label class="flex flex-col gap-1">
+          <span class="text-slate-400">Operation</span>
+          <select id="ev-op" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white">
+            <option value="u">UPDATE (u)</option>
+            <option value="c">INSERT (c)</option>
+            <option value="d">DELETE (d / Tombstone)</option>
+          </select>
+        </label>
+        <label class="flex flex-col gap-1">
+          <span class="text-slate-400">Status</span>
+          <input id="ev-status" type="text" value="REFUNDED" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white" />
+        </label>
+        <label class="flex flex-col gap-1">
+          <span class="text-slate-400">Amount (THB)</span>
+          <input id="ev-amount" type="number" value="12000" class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white" />
+        </label>
+        <label class="flex flex-col gap-1">
+          <span class="text-slate-400">Customer</span>
+          <input id="ev-customer" type="text" value="Somchai K." class="bg-slate-900 border border-slate-700 rounded px-2 py-1.5 text-white" />
+        </label>
+        <label class="flex items-center gap-2 pt-4 cursor-pointer">
+          <input id="ev-same-ms" type="checkbox" class="accent-amber-500" />
+          <span class="text-amber-300">จำลอง Retry ms เดียวกัน</span>
+        </label>
+      </div>
+      <button onclick="sendCustomEvent()" class="px-4 py-2 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white cursor-pointer transition w-fit">
+        ➕ Insert Part ใหม่เข้า ClickHouse
+      </button>
+    </div>
+
+    <div class="glass-card p-4 flex flex-col gap-2">
+      <h2 class="text-sm font-bold text-slate-300">📜 CDC Ingestion &amp; Merge Log</h2>
+      <div id="event-log" class="bg-slate-950/80 border border-slate-800 rounded p-3 text-[11px] font-mono text-slate-300 h-40 overflow-y-auto flex flex-col gap-1"></div>
+    </div>
+  </section>
+
+  <script>
+    const fmtTHB = (v) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+
+    async function fetchState() {
+      const res = await fetch('/api/state');
+      render(await res.json());
+    }
+
+    async function runAction(url) {
+      const res = await fetch(url, { method: 'POST' });
+      render(await res.json());
+    }
+
+    async function sendCustomEvent() {
+      const payload = {
+        order_id: Number(document.getElementById('ev-order-id').value),
+        cdc_op: document.getElementById('ev-op').value,
+        order_status: document.getElementById('ev-status').value,
+        amount: Number(document.getElementById('ev-amount').value),
+        customer_name: document.getElementById('ev-customer').value,
+        product_name: 'Custom Item',
+        same_ms_collision: document.getElementById('ev-same-ms').checked,
+      };
+      const res = await fetch('/api/action/custom-event', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      render(await res.json());
+    }
+
+    function render(data) {
+      document.getElementById('scenario-title').textContent = data.scenario_title;
+      document.getElementById('scenario-explanation').textContent = data.scenario_explanation;
+      document.getElementById('interview-takeaway').textContent = data.interview_takeaway || 'ลองกดเลือก Scenario เพื่อดูคำแนะนำการตอบสัมภาษณ์';
+      document.getElementById('truth-badge').textContent =
+        `Ground Truth (OLTP ปัจจุบัน): ${data.truth.row_count} Active Order(s) | ยอดเงินจริง ฿${fmtTHB(data.truth.total_revenue)}`;
+      document.getElementById('parts-summary').textContent =
+        `(${data.part_count} Parts / ${data.total_stored_rows} Stored Rows on Disk)`;
+
+      // Highlight active scenario button
+      ['1-stale-read', '2-zombie-trap', '3-same-ts-collision'].forEach((id) => {
+        const btn = document.getElementById(`btn-${id}`);
+        if (btn) {
+          btn.classList.toggle('ring-2', data.active_scenario === id);
+          btn.classList.toggle('ring-white', data.active_scenario === id);
+        }
+      });
+
+      // Render MergeTree Parts
+      const partsEl = document.getElementById('parts-container');
+      if (data.parts.length === 0) {
+        partsEl.innerHTML = '<div class="text-xs text-slate-400 col-span-full">ไม่มี Data Part ค้างอยู่บน Disk</div>';
+      } else {
+        partsEl.innerHTML = data.parts.map((part) => `
+          <div class="bg-slate-950/80 border ${part.level > 0 ? 'border-emerald-500/40' : 'border-slate-800'} rounded-lg p-3 flex flex-col gap-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-mono font-bold text-sky-300">${part.part_id}</span>
+              <span class="px-2 py-0.5 rounded text-[10px] font-bold ${part.level > 0 ? 'bg-emerald-500/20 text-emerald-300' : 'bg-amber-500/15 text-amber-300'}">
+                ${part.level > 0 ? 'MERGED PART' : 'UNMERGED PART'}
+              </span>
+            </div>
+            ${part.rows.map((r) => `
+              <div class="text-[11px] font-mono bg-slate-900/90 border ${r.is_deleted ? 'border-rose-500/40' : 'border-slate-800'} rounded p-2 flex flex-col gap-1">
+                <div class="flex items-center justify-between">
+                  <span class="font-bold text-white">Order #${r.order_id} (${r.customer_name})</span>
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold ${r.is_deleted ? 'bg-rose-500/20 text-rose-300' : 'bg-sky-500/20 text-sky-300'}">
+                    op=${r.cdc_op} • ${r.order_status}
+                  </span>
+                </div>
+                <div class="text-slate-300">amount=฿${fmtTHB(r.amount)} | is_deleted=<span class="${r.is_deleted ? 'text-rose-400 font-bold' : 'text-emerald-400'}">${r.is_deleted}</span></div>
+                <div class="text-slate-400">version_ts=${r.version_ts} | seq=#${r.insert_seq}</div>
+                <div class="text-emerald-300">wal_lsn=${r.wal_lsn} | kafka_offset=${r.kafka_offset}</div>
+              </div>
+            `).join('')}
+          </div>
+        `).join('');
+      }
+
+      // Render 4 Query Cards
+      const order = ['raw_select', 'zombie_trap', 'final_ts', 'argmax_lsn'];
+      const gridEl = document.getElementById('queries-grid');
+      gridEl.innerHTML = order.map((key) => {
+        const q = data.queries[key];
+        const borderClass = q.is_correct ? 'border-emerald-500/40' : 'border-rose-500/50';
+        const badgeClass = q.is_correct
+          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+          : 'bg-rose-500/20 text-rose-300 border border-rose-500/40';
+        const tableRows = q.rows.length === 0
+          ? `<tr><td colspan="5" class="py-3 text-center text-slate-500">0 rows returned</td></tr>`
+          : q.rows.map((r) => `
+              <tr class="border-t border-slate-800/80">
+                <td class="py-1.5 px-2 font-mono text-white">#${r.order_id}</td>
+                <td class="py-1.5 px-2">${r.customer_name}</td>
+                <td class="py-1.5 px-2 font-bold ${r.order_status === 'CANCELLED' ? 'text-amber-300' : 'text-sky-300'}">${r.order_status}</td>
+                <td class="py-1.5 px-2 text-right font-mono">฿${fmtTHB(r.amount)}</td>
+                <td class="py-1.5 px-2 text-right font-mono text-slate-400">${r.wal_lsn}</td>
+              </tr>
+            `).join('');
+
+        return `
+          <div class="glass-card p-4 flex flex-col gap-3 ${borderClass}">
+            <div class="flex items-start justify-between gap-2">
+              <h3 class="text-sm font-bold text-white">${q.title}</h3>
+              <span class="text-[11px] font-bold px-2.5 py-0.5 rounded shrink-0 ${badgeClass}">
+                ${q.is_correct ? 'PASS ✅' : 'FAIL ❌'}
+              </span>
+            </div>
+
+            <pre class="bg-slate-950/90 border border-slate-800 rounded p-2.5 text-[11px] font-mono text-sky-200">${q.sql}</pre>
+
+            <div class="text-xs px-3 py-2 rounded ${q.is_correct ? 'bg-emerald-950/50 text-emerald-200 border border-emerald-500/30' : 'bg-rose-950/50 text-rose-200 border border-rose-500/30'}">
+              ${q.verdict}
+            </div>
+
+            <div class="flex items-center justify-between text-xs text-slate-300 px-1">
+              <span>Returned Rows: <strong class="text-white">${q.row_count}</strong></span>
+              <span>Dashboard Revenue: <strong class="${q.is_correct ? 'text-emerald-300' : 'text-rose-300'}">฿${fmtTHB(q.total_revenue)}</strong></span>
+            </div>
+
+            <div class="overflow-x-auto border border-slate-800 rounded-lg bg-slate-950/60">
+              <table class="w-full text-left text-xs">
+                <thead class="bg-slate-900 text-slate-400 text-[11px]">
+                  <tr>
+                    <th class="py-1.5 px-2">Order</th>
+                    <th class="py-1.5 px-2">Customer</th>
+                    <th class="py-1.5 px-2">Status</th>
+                    <th class="py-1.5 px-2 text-right">Amount</th>
+                    <th class="py-1.5 px-2 text-right">WAL LSN</th>
+                  </tr>
+                </thead>
+                <tbody>${tableRows}</tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      // Render event log
+      const logEl = document.getElementById('event-log');
+      logEl.innerHTML = data.event_log.length === 0
+        ? '<span class="text-slate-500">ยังไม่มี Event</span>'
+        : data.event_log.slice().reverse().map((line) => `<div>${line}</div>`).join('');
+    }
+
+    fetchState();
+  </script>
+</body>
+</html>
