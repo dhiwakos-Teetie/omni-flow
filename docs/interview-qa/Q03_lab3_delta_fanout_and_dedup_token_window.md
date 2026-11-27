@@ -12,7 +12,7 @@
 > * **เรื่องที่ต้องดูจาก Lab นี้:** จุดวาง Logic Fan-out `-1 / +1` ที่ชั้น CDC Consumer, การใช้ `ENGINE = Null` + `deduplicate_blocks_in_dependent_materialized_views = 1` + `insert_deduplication_token` และขอบเขตของ Deduplication Window vs `REPLACE PARTITION`
 
 ---
-
+ํ
 ## 🎙️ โจทย์สัมภาษณ์ (Interviewer Prompt)
 
 > *"สมมติเราเลือกทางเลือกสำรอง คือใช้ `ReplacingMergeTree + Partition Pruning` บนตารางหลัก แล้วทำ Incremental Materialized View ส่ง Delta (`-1 / +1`) เข้า `SummingMergeTree` สำหรับหน้าจอ Dashboard — ปัญหาที่ Incremental MV เป็น Insert Trigger และอาจนับซ้ำเวลา Update นั้น จะออกแบบ Logic ตรงไหนให้มันส่ง Delta `-1` กับ `+1` ออกมาได้ถูกต้องจริงๆ? และถ้า Replay ด้วย `insert_deduplication_token` ที่มี Deduplication Window จำกัด จะรับประกันความถูกต้อง 100% ยังไง?"*

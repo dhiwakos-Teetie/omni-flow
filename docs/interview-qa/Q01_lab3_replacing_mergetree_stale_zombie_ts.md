@@ -50,11 +50,48 @@
   * ถ้าเขียน `SELECT ... FROM orders_replica WHERE is_deleted = 0 GROUP BY order_id` ตัวแถว Tombstone (`is_deleted = 1`) จะถูก `WHERE` ตัดทิ้งก่อน merge ➔ ทำให้แถวเวอร์ชันเก่า (`SHIPPED`, `is_deleted = 0`) **"ฟื้นคืนชีพ" (Zombie Row)** กลับเข้ามาใน Dashboard ทันที (พิสูจน์แล้วบน ClickHouse 24.8 ว่า Order `#101` ที่ถูกลบแล้วโผล่กลับมาเป็น `SHIPPED` จริง!)
   * ต้อง Deduplicate ให้เสร็จก่อน แล้วค่อยตัด Tombstone ออกด้วย **`HAVING is_deleted = 0`** หรือ **`FINAL WHERE is_deleted = 0`** เท่านั้น
 
-### ข้อ 1.3 — เกร็ดจริงบน ClickHouse 24.8: `OPTIMIZE FINAL` vs `FINAL CLEANUP`
+### ข้อ 1.3 — แยกให้ออก: `SELECT ... FINAL` vs `OPTIMIZE TABLE ... FINAL` vs `FINAL CLEANUP`
 * **ดูโค้ดที่:** [`verify_clickhouse_real.py`](../../lab3-debezium-cdc/verify_clickhouse_real.py) (Scenario 4a & 4b)
-* **สิ่งที่พิสูจน์ได้จริงบนเครื่อง:**
-  * **4a (`OPTIMIZE TABLE ... FINAL`):** ยุบเหลือ `1` Part และลบเวอร์ชันเก่าทิ้งแล้ว **แต่ ClickHouse 24.8 ยังคงเก็บแถว Tombstone `(101, 'DELETED', 1)` ไว้บนดิสก์ตามค่าเริ่มต้น!**
-  * **4b (`OPTIMIZE TABLE ... FINAL CLEANUP`):** ต้องเปิด Table-level Setting `SETTINGS allow_experimental_replacing_merge_with_cleanup = 1` ตอน `CREATE TABLE` ถึงจะลบแถว Tombstone ออกจากดิสก์จริง ➔ ตอกย้ำว่า Dashboard **ต้องอ่านผ่าน View ที่กรอง `is_deleted = 0` เสมอ แม้หลัง Merge แล้วก็ตาม**
+* **เปรียบเทียบ 3 คำสั่งที่มักจำสลับกัน:**
+
+| คำสั่ง | ทำงานตอนไหน | แตะไฟล์บนดิสก์ไหม? | พฤติกรรมกับแถว Tombstone (`is_deleted = 1`) | ใช้ใน Production ยังไง |
+| :--- | :--- | :--- | :--- | :--- |
+| **`SELECT ... FINAL`** | ตอนอ่าน (Merge-on-Read) | **ไม่แก้ดิสก์** (ยุบใน RAM ตอน query) | ซ่อนแถวที่ `is_deleted = 1` ให้ตอนอ่าน *(เมื่อประกาศ 2 args `ReplacingMergeTree(ver, is_deleted)`)* | **ใช้ครอบเป็น View** ให้ Dashboard อ่านข้อมูลสด |
+| **`OPTIMIZE TABLE ... FINAL`** | สั่ง Merge บังคับ | **เขียนดิสก์ใหม่ทั้งก้อน** | ยุบเหลือ `1` Part แต่ ClickHouse 24.8 **ยังคงเก็บแถว Tombstone ไว้บนดิสก์** | **ห้ามใช้แก้ความสด** (กิน Disk I/O หนัก) |
+| **`OPTIMIZE TABLE ... FINAL CLEANUP`** | สั่ง Merge + กวาด Tombstone | **เขียนดิสก์ใหม่ + ลบ Tombstone จริง** | **ลบแถว `is_deleted = 1` ออกจากดิสก์ถาวร** *(ต้องเปิด `allow_experimental_replacing_merge_with_cleanup = 1` ตอน `CREATE TABLE`)* | **ใช้เฉพาะ Off-peak (กลางคืน)** แบบระบุทีละ Partition เก่าเพื่อคืนพื้นที่ดิสก์ |
+
+* **สิ่งที่พิสูจน์ได้จริงบนเครื่อง (ClickHouse 24.8):**
+  * **4a (`OPTIMIZE TABLE ... FINAL`):** ยุบเหลือ `1` Part และลบเวอร์ชันเก่าทิ้งแล้ว **แต่ ClickHouse 24.8 ยังคงเก็บแถว Tombstone `(101, 'DELETED', 1)` ไว้บนดิสก์ตามค่าเริ่มต้น!** ➔ ตอกย้ำว่า Dashboard **ต้องอ่านผ่าน View ที่กรอง `is_deleted = 0` เสมอ แม้หลัง Merge แล้วก็ตาม**
+  * **4b (`OPTIMIZE TABLE ... FINAL CLEANUP`):** ลบแถว Tombstone ออกจากดิสก์จริงเมื่อเปิด Table-level Setting `SETTINGS allow_experimental_replacing_merge_with_cleanup = 1`
+* **ทำไม *ห้าม* ใช้ `OPTIMIZE TABLE ... FINAL` / `FINAL CLEANUP` แก้ปัญหาความสดใน Production (4 เหตุผลสำคัญ):**
+  1. **Disk I/O & Write Amplification หนัก:** บังคับอ่าน-เขียนข้อมูลใหม่ทั้งก้อนบนตารางระดับร้อยล้านแถวจนคลัสเตอร์หน่วง
+  2. **กัน Race Condition ไม่ได้:** ระหว่างที่ `OPTIMIZE` กำลังรัน สาย CDC ยัง `INSERT` สร้าง Part ใหม่เข้ามาตลอดเวลา
+  3. **เสี่ยง Zombie Row ถาวรจาก Late/Retry Event:** หาก `FINAL CLEANUP` ลบ Tombstone ออกจากดิสก์เร็วเกินไป แล้ว Kafka ส่ง event เก่า (`is_deleted = 0`) ซ้ำเข้ามาทีหลัง ClickHouse จะไม่เหลือ Tombstone ไว้เทียบ ➔ แถวที่ถูกลบไปแล้วจะฟื้นคืนชีพถาวร!
+  4. **วิธีใช้งานจริงบน Production (Off-peak Housekeeping):** รันเฉพาะ **ตอนกลางคืน / Traffic ต่ำ** และระบุ **ทีละ Partition เก่า** ที่หยุดรับ Write/Retry แล้วเท่านั้น เพื่อคืนพื้นที่ดิสก์:
+     ```sql
+     OPTIMIZE TABLE cdc_olap.orders_replica PARTITION '202610' FINAL CLEANUP;
+     ```
+* **ตัวอย่าง `CREATE TABLE` แบบ Production-ready (รองรับ `FINAL`, `wal_lsn`, และ `FINAL CLEANUP` ทีละ Partition):**
+  ```sql
+  CREATE TABLE cdc_olap.orders_replica (
+      order_id UInt32,
+      customer_name String,
+      product_name String,
+      category LowCardinality(String),
+      amount Decimal(12, 2),
+      order_status LowCardinality(String),
+      cdc_op LowCardinality(String),
+      wal_lsn UInt64,              -- ใช้ PostgreSQL WAL LSN แทน wall-clock ts_ms
+      kafka_offset UInt64,         -- ใช้เป็น tie-breaker คู่กับ wal_lsn
+      is_deleted UInt8,            -- 0 = active, 1 = soft-delete tombstone
+      created_at DateTime
+  )
+  ENGINE = ReplacingMergeTree(wal_lsn, is_deleted)
+  PARTITION BY toYYYYMM(created_at) -- แยก Partition รายเดือน เพื่อสั่ง CLEANUP ทีละเดือนเก่าได้
+  ORDER BY (order_id)
+  SETTINGS allow_experimental_replacing_merge_with_cleanup = 1;
+  -- ⚠️ ต้องเปิดเป็น Table-level Setting ตอน CREATE TABLE เท่านั้น (ใส่ตอนรัน SELECT/OPTIMIZE จะ error)
+  ```
 
 ### ข้อ 1.4 — จะเกิดอะไรขึ้นถ้า 2 Updates มี `version_ts` เท่ากันเป๊ะ?
 * **ดูโค้ดที่:** [`cdc_sink_worker.py`](../../lab3-debezium-cdc/cdc_sink_worker.py#L93) และ [`verify_clickhouse_real.py`](../../lab3-debezium-cdc/verify_clickhouse_real.py) (Scenario 3)
@@ -62,6 +99,24 @@
   * เมื่อ `ORDER BY (order_id)` และ `version_ts` เท่ากันเป๊ะ ClickHouse จะเก็บ **แถวที่ถูกเขียน/Merge ทีหลังสุดตามลำดับกายภาพ**
   * **ความเสี่ยง:** ถ้าระบบยิง `UPDATE` 2 ครั้งใน millisecond เดียวกัน หรือเกิด Retry / Out-of-order replay ผลลัพธ์จะ **Nondeterministic** (พิสูจน์แล้วใน Scenario 3 ที่ `PAID` เก่าที่ถูก retry ทีหลังมาทับ `CANCELLED` ใหม่)
   * **วิธีแก้ตาม DDIA บทที่ 8 & 11:** ยอมรับตรงๆ ว่าใน `cdc_sink_worker.py` ใช้ `ts_ms` (Wall-clock) เพื่อให้ง่ายต่อการสาธิต แต่บน Production ต้องเปลี่ยนเป็น **PostgreSQL WAL LSN (`payload["source"]["lsn"]`)** ซึ่งเป็น 64-bit Monotonic Sequence หรือใช้คู่ **`(wal_lsn, kafka_offset)`** เพื่อการันตีลำดับแบบ Deterministic 100%
+* **เจาะลึก `wal_lsn` (ทำไม Production ต้องใช้แทน `ts_ms`):**
+  * **`WAL LSN` คืออะไร:** ย่อมาจาก **Write-Ahead Log — Log Sequence Number** คือ **เลขตำแหน่งไบต์ (Byte Offset)** ในสมุดบันทึก WAL ของ PostgreSQL (เช่น Hex `0/197E880` ➔ `UInt64` = `26,732,672`) ซึ่ง **วิ่งขึ้นทางเดียวเสมอ (Strictly Monotonic)** ไม่มีวันถอยหลังและไม่มีทางชนกัน แม้เกิด 2 `UPDATE` ใน millisecond เดียวกัน
+  * **เทียบ `ts_ms` vs `wal_lsn` (DDIA บทที่ 8):**
+
+| ประเด็น | `ts_ms` (Wall-Clock Time) | `wal_lsn` (Monotonic Sequence) |
+| :--- | :--- | :--- |
+| **2 `UPDATE` ใน 1 ms เดียวกัน** | **เลขชนกัน!** ClickHouse หยิบแถวที่เขียนทีหลัง ➔ พังตอน Retry | **ไม่ชน!** คำสั่งหลังได้ byte offset สูงกว่าเสมอ (`900250 > 900100`) |
+| **NTP Clock Skew / นาฬิกาถอยหลัง** | เสี่ยงเวลาถอยหลัง ทำให้ของเก่าทับของใหม่ | ไม่เกี่ยวกับนาฬิกา อ้างอิงตำแหน่งไบต์จริงใน WAL |
+| **ผลลัพธ์ตอน Merge / `FINAL`** | Nondeterministic (ขึ้นกับจังหวะ Retry/Merge) | **Deterministic 100%** (สลับลำดับมาถึงแค่ไหน ผลสุดท้ายก็ถูกเสมอ) |
+
+  * **วิธีใช้งานจริงในสาย Debezium ➔ ClickHouse:**
+    * Debezium ส่ง `wal_lsn` แบบ 64-bit integer แนบมาใน **`payload["source"]["lsn"]`** อยู่แล้ว
+    * นิยมใช้คู่ **`(wal_lsn, kafka_offset)`** เป็น Tie-breaker (เช่น `argMax(..., (wal_lsn, kafka_offset))`) เพื่อรองรับกรณี **Initial Snapshot (`op = 'r'`)** ที่ `source.lsn` อาจเป็น `null` หรือกรณี 1 Transaction แก้แถวเดิมซ้ำหลายรอบ
+  * **คำสั่งดู `wal_lsn` จริงบน PostgreSQL:**
+    ```sql
+    SELECT pg_current_wal_lsn() AS wal_lsn_hex,
+           (pg_current_wal_lsn() - '0/0'::pg_lsn) AS wal_lsn_int64;
+    ```
 
 ---
 
